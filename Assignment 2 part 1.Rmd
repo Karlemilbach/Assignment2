@@ -176,6 +176,10 @@ dfstudy2 <- read.csv("dfstudy2")
 dfstudy4 <- read.csv("dfstudy4")
 
 recurrence_data <- rbind(dfstudy1, dfstudy2, dfstudy4)
+
+#write the final data frame to a csv file 
+write.csv(recurrence_data, "df_final")
+
 ```
 
 
@@ -192,7 +196,7 @@ demo_data = read.delim("DemoData.txt")
 articulation$Subject=substr(articulation$soundname, 8, 12)
 
 #set control to 0S and schizophrenia to 10
-demo_data$Diagnosis=revalue(demo_data$Diagnosis,c("Control"="0S","Schizophrenia"="1S"))
+demo_data$Diagnosis=plyr::revalue(demo_data$Diagnosis,c("Control"="0S","Schizophrenia"="1S"))
 
 articulation$trial <- trial[n] <- sub("_", "", substr(articulation, 20, 21))
 
