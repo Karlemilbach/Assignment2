@@ -129,7 +129,7 @@ for (file in files) {
   #diagnosis[n] = str_extract(diagnosis_temp, "\\d")
   
   
-  
+  # get descriptive statistics
   mean[n] <- mean(df$f0)
   sd[n] <- sd(df$f0)
   range[n] <- range(df$f0)
