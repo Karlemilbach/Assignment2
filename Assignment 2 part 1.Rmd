@@ -13,7 +13,6 @@ knitr::opts_chunk$set(echo = TRUE)
 Working directory and packages:
 ```{r}
 wd <- setwd("~/Desktop/Experimental methods 3/Assignment 2")
-install.packages("crqa");install.packages("tseriesChaos");install.packages("nonlinearTseries");install.packages("SparseM")
 library(crqa);library(tseriesChaos);library(SparseM);library(nonlinearTseries);library(plyr)
 
 ```
@@ -110,10 +109,27 @@ for (file in files) {
   df = read.delim(file)
   
   # create the values to be put in each of the empty lists that we created above
+  
+  # Extract the participant information from the file name  
+  
+  #S in Subject is wrote in capital letter to make it fit to the other dataframes...
   Subject[n] <-  substr(file, 14, 18)
   study[n] <-  substr(file, 7, 12)
   trial[n] <- sub("_", "", substr(file, 20, 21))
   diagnosis[n] <-  substr(file, 14, 14)
+  
+  #or with the stringr package we could do this stuff using regular expressions (this is a more robust way of doing it).
+  
+  #ID = str_extract(file, "S\\d+")
+  #Subject[n] = str_extract(ID, "\\d")
+  #study[n] = str_extract(file, "Study+\\d")
+  #trial_temp = str_exstract(file, "T+\\d+")
+  #trial[n] = str_extract(trial_temp, "\\d")
+  #diagnosis_temp = str_extract(file, "D+\\d")
+  #diagnosis[n] = str_extract(diagnosis_temp, "\\d")
+  
+  
+  
   mean[n] <- mean(df$f0)
   sd[n] <- sd(df$f0)
   range[n] <- range(df$f0)
@@ -266,6 +282,10 @@ demo_df <- read.delim("DemoData.txt")
 
 
 files_test <- list.files(path = wd, pattern = "Study1D0S101T*", recursive = TRUE)
+
+ID <- stringr::string_extract(x, "S + \\d+")
+
+?string_extract()
 
 ID <- substr(files, 16, 18)
 ID
