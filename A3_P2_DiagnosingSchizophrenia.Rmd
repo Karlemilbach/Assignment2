@@ -1,0 +1,118 @@
+---
+title: "Assignment 3 - Part 2 - Diagnosing Schizophrenia from Voice"
+author: "Riccardo Fusaroli"
+date: "October 17, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Assignment 3 - Diagnosing schizophrenia from voice
+
+In the previous part of the assignment you generated a bunch of "features", that is, of quantitative descriptors of voice in schizophrenia, focusing on pitch.
+In the course of this assignment we will use them to try to automatically diagnose schizophrenia from voice only, that is, relying on the set of features you produced last time, we will try to produce an automated classifier.
+
+```{r}
+wd <- setwd("~/Desktop/Experimental methods 3/Assignment 2")
+
+#packages
+library(lme4);library(crqa);library(tseriesChaos);library(SparseM);library(nonlinearTseries)
+library(dplyr);library(caret);library(modelr);library(Metrics);library(stringr);library(tibble)
+
+# data
+df_features <- read.csv("df_final")
+df_features$X.1 <- NULL
+df_features$X <- NULL
+df_features$Subject <- substr(df_features$Subject,3,5)
+
+```
+
+### Question 1
+Build a logistic regression to see whether you can diagnose schizophrenia from pitch range only.
+```{r}
+model_range <- glm(diagnosis ~ range, data = df_features, family = "binomial")
+
+summary(model_range)
+```
+
+Calculate the different performance measures (accuracy, sensitivity, specificity, PPV, NPV, ROC curve) on a logistic regression using the full dataset. Don't forget the random effects!
+```{r}
+model_range2 <- lme4::glmer(diagnosis~range+(1+trial|Subject), family="binomial",data = df_features)
+
+
+df_features$PredictionsPerc=predict(model_range2)
+df_features$Predictions[df_features$PredictionsPerc>0.5]=1
+df_features$Predictions[df_features$PredictionsPerc<=0.5]=0
+confusionMatrix(data = df_features$Predictions, reference = df_features$diagnosis, positive = "0")
+
+```
+
+
+Then cross-validate the logistic regression and re-calculate performance on the testing folds. N.B. The cross-validation functions you already have should be tweaked: you need to calculate these new performance measures.
+```{r}
+df_features$Subject <- as.numeric(df_features$Subject)
+folds = createFolds(unique(df_features$Subject),k=5)
+
+
+
+n=1
+error.train=NULL
+error.test=NULL
+for (i in folds)
+  {
+  testD=df_features[df_features$Subject %in% i,]
+  trainD=df_features[!(df_features$Subject %in% i),]
+  Mtrain = lme4::glmer(diagnosis~range+(1+trial|Subject), family="binomial", data = df_features)
+  pred = predict(Mtrain,testD, allow.new.levels=TRUE)
+  error.train[n]=modelr::rmse(Mtrain,trainD)
+  error.test[n]=Metrics::rmse(testD$diagnosis,pred)
+  
+  #error.trains = c(error.trains,error.train[n])
+  #error.tests = c(error.tests, error.test[n])
+
+  n=n+1
+  
+}
+mean(error.train)
+mean(error.test)
+
+```
+
+N.B. the predict() function generates probabilities (the full scale between 0 and 1). A probability > .5 indicates a choice of 1, below a choice of 0.
+N.B. you need to decide whether calculate performance on each single test fold or save all the prediction for test folds in one datase, so to calculate overall performance.
+N.B. Now you have two levels of structure: subject and study. Should this impact your cross-validation?
+
+
+
+
+
+### Question 2
+
+Which single predictor is the best predictor of diagnosis?
+
+### Question 3
+
+Now it's time to go wild! Use all (voice-related) variables and interactions you can think of. Compare models and select the best performing model you can find.
+
+Remember:
+- Cross-validation or AIC are crucial to build the best model!
+- After choosing the model, train it on all the data you have
+- Save the model: save(modelName, file = "BestModelForever.rda")
+- Create a Markdown that can: a) extract the features from new pitch files (basically your previous markdown), b) load your model (e.g. load("BestModelForever.rda")), and c) predict the diagnosis in the new dataframe.
+Send it to Celine and Riccardo by Monday (so they'll have time to run it before class)-
+
+### Question 4: Report the results
+
+METHODS SECTION: how did you analyse the data?
+
+RESULTS SECTION: can you diagnose schizophrenia based on voice? which features are used? Comment on the difference between the different performance measures.
+
+### Bonus question 5
+
+You have some additional bonus data involving speech rate, pauses, etc. Include them in your analysis. Do they improve classification?
+
+### Bonus question 6
+
+Logistic regression is only one of many classification algorithms. Try using others and compare performance. Some examples: Discriminant Function, Random Forest, Support Vector Machine, etc. The package caret provides them.
