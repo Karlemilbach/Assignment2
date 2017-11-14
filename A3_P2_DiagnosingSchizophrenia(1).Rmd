@@ -1,0 +1,262 @@
+---
+title: "Assignment 3 - Part 2 - Diagnosing Schizophrenia from Voice"
+author: "Riccardo Fusaroli"
+date: "October 17, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Assignment 3 - Diagnosing schizophrenia from voice
+
+In the previous part of the assignment you generated a bunch of "features", that is, of quantitative descriptors of voice in schizophrenia, focusing on pitch.
+In the course of this assignment we will use them to try to automatically diagnose schizophrenia from voice only, that is, relying on the set of features you produced last time, we will try to produce an automated classifier.
+
+```{r}
+wd <- setwd("~/Desktop/Experimental methods 3/Assignment 2")
+
+#packages
+library(lme4);library(crqa);library(tseriesChaos);library(SparseM);library(nonlinearTseries)
+library(dplyr);library(caret);library(modelr);library(Metrics);library(stringr);library(tibble)
+library(pROC)
+library(groupdata2)
+
+# data
+df_features <- read.csv("df_final")
+
+#remove unnecessary columns
+df_features$X.1 <- NULL
+df_features$X <- NULL
+df_features$Subject <- substr(df_features$Subject,3,5)
+
+#create column with each subject's unique number to match their "foldnumber later on"
+df_features$unique_Subject <- df_features$Subject
+df_features$Subject <- as.factor(df_features$Subject)
+df_features$unique_Subject <- as.numeric(df_features$Subject)
+
+
+numfolds = 5
+df_features <- fold(df_features, k = numfolds, id_col = "unique_Subject")
+colnames(df_features)[18]="folds"
+```
+
+### Question 1: Can you diagnose schizophrenia from pitch range only? If so, how well?
+
+Build a logistic regression to see whether you can diagnose schizophrenia from pitch range only.
+```{r}
+model_range <- glm(diagnosis ~ range, data = df_features, family = "binomial")
+summary(model_range)
+```
+
+Calculate the different performance measures (accuracy, sensitivity, specificity, PPV, NPV, ROC curve) on a logistic regression using the full dataset. Don't forget the random effects!
+```{r}
+model_range2 <- lme4::glmer(diagnosis~range + trial + (1+trial|Subject), family="binomial",data = df_features,control = glmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+summary(model_range2)
+
+#creating a confusion matrix
+df_features$PredictionsPerc=predict(model_range2)
+df_features$Predictions[df_features$PredictionsPerc>0.0]=1
+df_features$Predictions[df_features$PredictionsPerc<=0.0]=0
+confMatrix <- confusionMatrix(data = df_features$Predictions, reference = df_features$diagnosis, positive = "0")
+confMatrix
+confMatrix$overall[1]
+confMatrix$byClass[1]
+confMatrix$byclass
+
+#getting the area under the curve (AUC) with roc() 
+rocCurve <- roc(response = df_features$diagnosis, predictor = df_features$PredictionsPerc)
+rocCurve
+
+auc(rocCurve)
+ci(rocCurve)
+
+#plotting the roc curve
+plot(rocCurve, legacy.axes = TRUE)
+
+
+```
+
+Then cross-validate the logistic regression and re-calculate performance on the testing folds. N.B. The cross-validation functions you already have should be tweaked: you need to calculate these new performance measures.
+
+N.B. the predict() function generates log odds (the full scale between minus and plus infinity). Log odds > 0 indicates a choice of 1, below a choice of 0.
+N.B. you need to decide whether calculate performance on each single test fold or save all the prediction for test folds in one datase, so to calculate overall performance.
+N.B. Now you have two levels of structure: subject and study. Should this impact your cross-validation?
+```{r}
+
+test_accuracy <- NULL
+test_sen <-  NULL
+test_spec <-  NULL
+test_npv <-  NULL
+test_ppv <-  NULL
+test_auc <- NULL
+test_ciLower <- NULL
+test_ciHigher <- NULL
+
+n=1
+
+for (i in seq(numfolds))
+  {
+  #testD = subset(testD, folds !=  i)
+  testD=df_features[df_features$folds %in% i,]
+  trainD=df_features[!(df_features$folds %in% i),]
+  Mtrain = model_range2
+
+testD$Predictionslogodds = predict(Mtrain,testD,allow.new.levels=TRUE)
+testD$Predictions[testD$Predictionslogodds>0] = "1"
+testD$Predictions[testD$Predictionslogodds<0] = "0"
+test_matrix = confusionMatrix(data = testD$Predictions,reference = testD$diagnosis, positive = "0")
+
+test_accuracy[n]=test_matrix$overall[1]
+test_sen[n]=test_matrix$byClass[1]
+test_spec[n]=test_matrix$byClass[2]
+test_ppv[n]=test_matrix$byClass[3]
+test_npv[n]=test_matrix$byClass[4]
+
+test_RocCurve=roc(response=testD$diagnosis,predictor = testD$Predictionslogodds)
+test_auc[n]=test_RocCurve$auc
+test_ciLower[n]=ci(test_RocCurve)[1]
+test_ciHigher[n]=ci(test_RocCurve)[2]
+
+  n=n+1
+  
+}
+
+testdf = data.frame(test_accuracy,test_sen,test_spec,test_npv,test_ppv,test_auc,test_ciLower,test_ciHigher)
+
+```
+
+
+### Question 2 - Which single acoustic predictor is the best predictor of diagnosis?
+```{r}
+cvalid <- function(model, k = 5) {
+  
+  #creating empty lists to be filled with information later
+  test_accuracy <- NULL
+  test_sen <- NULL
+  test_spec <- NULL
+  test_auc <-  NULL
+  test_ciLower <-  NULL
+  test_ciHigher <- NULL
+  test_NPV <- NULL
+  test_PPC <- NULL
+  
+  numfolds = k
+  
+   n = 1
+  
+  for (fold in seq(numfolds)) {
+  
+  testD=df_features[df_features$folds %in% fold,]
+  trainD=df_features[!(df_features$folds%in% fold),]
+  Mtrain = model
+  
+  
+  
+  #testD$pred <- predict(model, testD, allow.new.levels = T)
+  #test_cMatrix <- confusionMatrix(data = testD$pred, reference = trainD$diagnosis, positive = "0")
+  testD$Predictionslogodds=predict(model, testD, allow.new.levels = T)
+  testD$Predictions[testD$Predictionslogodds>0.0]=1
+  testD$Predictions[testD$Predictionslogodds<=0.0]=0
+  test_cMatrix <- confusionMatrix(data = testD$Predictions, reference = testD$diagnosis, positive = "0")
+  
+  #train_cMatrix <- confusionMatrix(data = trainD$Predictions, reference = trainD$diagnosis, positive = "0")
+  
+  #test data 
+  
+  test_accuracy[n] <- test_cMatrix$overall[1]
+  test_sen[n] <- test_cMatrix$byClass[1]
+  test_spec[n] <- test_cMatrix$byClass[2]
+  test_NPV[n] <- test_cMatrix$byClass[4]
+  test_PPC[n] <- test_cMatrix$byClass[3]
+  
+  test_rocCurve <- roc(response = testD$diagnosis, predictor = testD$Predictionslogodds)
+  
+  test_auc[n] <- auc(test_rocCurve) 
+  test_ciLower[n] <-  ci(test_rocCurve)[1]
+  test_ciHigher[n] <-  ci(test_rocCurve)[2]
+  
+  
+  n = n + 1
+    
+  }
+  
+  df = data.frame(mean(test_accuracy), mean(test_sen), mean(test_spec), mean(test_NPV), mean(test_PPC), mean(test_auc), mean(test_ciLower), mean(test_ciHigher))
+  return(df)
+  
+}
+
+```
+
+Now we can check which single accoustic feature is the best predictor for diagnosis:
+```{r}
+PR = cvalid(lme4::glmer(diagnosis~PR + trial + (1+trial|Subject), family = "binomial", data = trainD, control = glmerControl(optimizer = "nloptwrap", calc.derivs = FALSE)))
+PR$predictor = "PR"
+
+DET = cvalid(lme4::glmer(diagnosis~DET + trial + (1+trial|Subject), family = "binomial", data = trainD, control = glmerControl(optimizer = "nloptwrap", calc.derivs = FALSE)))
+DET$predictor = "DET"
+
+NRLINE = cvalid(lme4::glmer(diagnosis~NRLINE + trial + (1+trial|Subject), family = "binomial", data = trainD, control = glmerControl(optimizer = "nloptwrap", calc.derivs = FALSE)))
+NRLINE$predictor = "NRLINE"
+
+maxL = cvalid(lme4::glmer(diagnosis~maxL + trial + (1+trial|Subject), family = "binomial", data = trainD, control = glmerControl(optimizer = "nloptwrap", calc.derivs = FALSE)))
+maxL$predictor = "maxL"
+
+L = cvalid(lme4::glmer(diagnosis~L + trial + (1+trial|Subject), family = "binomial", data = trainD, control = glmerControl(optimizer = "nloptwrap", calc.derivs = FALSE)))
+L$predictor = "L"
+
+ENTR = cvalid(lme4::glmer(diagnosis~ENTR + trial + (1+trial|Subject), family = "binomial", data = trainD, control = glmerControl(optimizer = "nloptwrap", calc.derivs = FALSE)))
+ENTR$predictor = "ENTR"
+
+LAM = cvalid(lme4::glmer(diagnosis~LAM + trial + (1+trial|Subject), family = "binomial", data = trainD, control = glmerControl(optimizer = "nloptwrap", calc.derivs = FALSE)))
+LAM$predictor = "LAM"
+
+TT = cvalid(lme4::glmer(diagnosis~TT + trial + (1+trial|Subject), family = "binomial", data = trainD, control = glmerControl(optimizer = "nloptwrap", calc.derivs = FALSE)))
+TT$predictor = "TT"
+
+sd = cvalid(lme4::glmer(diagnosis~sd + trial + (1+trial|Subject), family = "binomial", data = trainD, control = glmerControl(optimizer = "nloptwrap", calc.derivs = FALSE)))
+sd$predictor = "sd"
+
+range = cvalid(lme4::glmer(diagnosis~range + trial + (1+trial|Subject), family = "binomial", data = trainD, control = glmerControl(optimizer = "nloptwrap", calc.derivs = FALSE)))
+range$predictor = "range"
+
+predictor_df = rbind(PR, DET, NRLINE, maxL, L, ENTR, LAM, TT, sd, range)
+
+#Based on area under the curve range is the best predictor for diagnosis. It is also the best predictor in terms of accuracy and specificity
+```
+
+
+
+### Question 3 - Which combination of acoustic predictors is best for diagnosing schizophrenia?
+
+Now it's time to go wild! Use all (voice-related) variables and interactions you can think of. Compare models and select the best performing model you can find.
+```{r}
+?groupdata2
+# Create a dataframe
+df <- data.frame('a' = c('a','a','b','b','c','c'))
+starts <- c("a", "e", "b", "d", "c")
+
+
+
+```
+
+
+
+Remember:
+- Out-of-sample error crucial to build the best model!
+- After choosing the model, send Celine and Riccardo the code of your model
+
+### Question 4: Properly report the results
+
+METHODS SECTION: how did you analyse the data? That is, how did you extract the data, designed the models and compared their performance?
+
+RESULTS SECTION: can you diagnose schizophrenia based on voice? which features are used? Comment on the difference between the different performance measures.
+
+### Bonus question 5
+
+You have some additional bonus data involving speech rate, pauses, etc. Include them in your analysis. Do they improve classification?
+
+### Bonus question 6
+
+Logistic regression is only one of many classification algorithms. Try using others and compare performance. Some examples: Discriminant Function, Random Forest, Support Vector Machine, etc. The package caret provides them.
